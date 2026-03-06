@@ -1,9 +1,9 @@
 {
-  "name": "spellright",
-  "displayName": "Spell Right",
+  "name": "spellright-local",
+  "displayName": "Spell Right (Local)",
   "description": "Multilingual, Offline and Lightweight Spellchecker",
   "version": "3.0.148",
-  "publisher": "ban",
+  "publisher": "local",
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -40,7 +40,8 @@
           "default": [
             "markdown",
             "latex",
-            "plaintext"
+            "plaintext",
+            "typst"
           ],
           "scope": "resource",
           "description": "Document types for which spelling will be turned ON by default."
@@ -191,6 +192,12 @@
           ],
           "scope": "resource",
           "description": "List of LaTeX commands that will have the parameter list spell checked."
+        },
+        "spellright.autoCorrect": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "description": "Automatically replace misspelled words with the top suggestion when a word boundary character (space, punctuation) is typed."
         },
         "spellright.useDocumentSymbolsInCode": {
           "type": "boolean",

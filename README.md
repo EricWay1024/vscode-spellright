@@ -1,5 +1,31 @@
 # Multilingual, Offline and Lightweight Spellchecker for Visual Studio Code
 
+---
+
+## Fork Changes
+
+This is a local fork of [ban.spellright](https://github.com/bartosz-antosik/vscode-spellright) with the following additions:
+
+### Typst support (`lib/parsers/typst.js`)
+
+A new parser for [Typst](https://typst.app/) documents (`.typ` files) is included. It is enabled by default. The parser skips the following from spell checking:
+
+- **Math expressions** — anything between `$...$` (inline and multiline display math)
+- **Code expressions** — identifiers immediately after `#`, e.g. `#pagebreak()`, `#set`, `#let`
+- **Label references and citations** — anything after `@`, e.g. `@cor:my-label`
+- **Import lines** — entire lines starting with `#import`, e.g. `#import "../../lib.typ": *`
+
+### Autocorrect (`spellright.autoCorrect`)
+
+A new setting `spellright.autoCorrect` (default: `false`) enables iOS-style autocorrect: when you type a word boundary character (space, tab, `.` `,` `!` `?`), the last typed word is automatically replaced with the top spelling suggestion if it is misspelled.
+
+Enable it in your settings:
+```json
+"spellright.autoCorrect": true
+```
+
+---
+
 ![Visual Studio Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/ban.spellright.svg?style=flat-square)
 ![Visual Studio Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/ban.spellright.svg?style=flat-square)
 ![Visual Studio Marketplace Downloads](https://img.shields.io/visual-studio-marketplace/d/ban.spellright.svg?style=flat-square)

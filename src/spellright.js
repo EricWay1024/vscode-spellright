@@ -1323,6 +1323,46 @@ var SpellRight = (function () {
         this.diagnosticMap[_document.uri.toString()] = diagnostics;
         this.diagnosticCollection.set(_document.uri, diagnostics.slice(0));
 
+        // Autocorrect: when a word boundary character is typed, auto-fix the
+        // preceding misspelled word using the top suggestion (like iOS autocorrect).
+        if (settings.autoCorrect &&
+            event.contentChanges.length === 1 &&
+            event.contentChanges[0].text.length === 1 &&
+            /[ \t,\.!?]/.test(event.contentChanges[0].text)) {
+
+            var _change = event.contentChanges[0];
+            var _line = _change.range.start.line;
+            var _col = _change.range.start.character;
+
+            for (var _di = 0; _di < diagnostics.length; _di++) {
+                var _diag = diagnostics[_di];
+                if (_diag.source === 'spelling' &&
+                    _diag.range.start.line === _line &&
+                    _diag.range.end.character === _col) {
+
+                    var _acWord = _diag['token'].word;
+                    var _acLangs = _diag['language'];
+                    var _acRange = _diag.range;
+
+                    for (var _ali = 0; _ali < _acLangs.length; _ali++) {
+                        this.setDictionary(_acLangs[_ali]);
+                        var _acSuggestions = bindings.getCorrectionsForMisspelling(_acWord);
+                        if (_acSuggestions.length > 0) {
+                            var _acFix = _acSuggestions[0];
+                            var _editor = vscode.window.activeTextEditor;
+                            if (_editor && _editor.document === _document) {
+                                _editor.edit(function (editBuilder) {
+                                    editBuilder.replace(_acRange, _acFix);
+                                });
+                            }
+                            break;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
         if (helpers._commands.syntax != _return.syntax ||
             helpers._commands.signature !== _signature) {
             this.doCancelSpellCheck();
