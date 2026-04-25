@@ -1333,33 +1333,62 @@ var SpellRight = (function () {
             var _change = event.contentChanges[0];
             var _line = _change.range.start.line;
             var _col = _change.range.start.character;
+            var _typed = _change.text;
 
-            for (var _di = 0; _di < diagnostics.length; _di++) {
-                var _diag = diagnostics[_di];
-                if (_diag.source === 'spelling' &&
-                    _diag.range.start.line === _line &&
-                    _diag.range.end.character === _col) {
-
-                    var _acWord = _diag['token'].word;
-                    var _acLangs = _diag['language'];
-                    var _acRange = _diag.range;
-
-                    for (var _ali = 0; _ali < _acLangs.length; _ali++) {
-                        this.setDictionary(_acLangs[_ali]);
-                        var _acSuggestions = bindings.getCorrectionsForMisspelling(_acWord);
-                        if (_acSuggestions.length > 0) {
-                            var _acFix = _acSuggestions[0];
-                            var _editor = vscode.window.activeTextEditor;
-                            if (_editor && _editor.document === _document) {
-                                _editor.edit(function (editBuilder) {
-                                    editBuilder.replace(_acRange, _acFix);
-                                });
-                            }
-                            break;
+            var _applyFix = function (_self, _word, _langs, _range) {
+                for (var _ali = 0; _ali < _langs.length; _ali++) {
+                    _self.setDictionary(_langs[_ali]);
+                    var _acSuggestions = bindings.getCorrectionsForMisspelling(_word);
+                    if (_acSuggestions.length > 0) {
+                        var _acFix = _acSuggestions[0];
+                        var _editor = vscode.window.activeTextEditor;
+                        if (_editor && _editor.document === _document) {
+                            _editor.edit(function (editBuilder) {
+                                editBuilder.replace(_range, _acFix);
+                            });
                         }
+                        return true;
                     }
-                    break;
                 }
+                return false;
+            };
+
+            var _findAndFix = function (_self, _diags) {
+                for (var _di = 0; _di < _diags.length; _di++) {
+                    var _diag = _diags[_di];
+                    if (_diag.source === 'spelling' &&
+                        _diag.range.start.line === _line &&
+                        _diag.range.end.character === _col) {
+                        _applyFix(_self, _diag['token'].word, _diag['language'], _diag.range);
+                        return true;
+                    }
+                }
+                return false;
+            };
+
+            var _matched = _findAndFix(this, diagnostics);
+
+            // SPELLRIGHT_LEXEM_BUILD treats `.` as part of a word (so
+            // abbreviations like "U.S.A." stay as one token), so typing `.`
+            // after "helo" produces the single token "helo." which the parser
+            // then skips because `echaracter` matches the token's last
+            // position (mid-edit guard). No diagnostic is created and the
+            // search above finds nothing. Re-run spellCheckRange on this line
+            // with echaracter shifted past the period so the guard misses and
+            // the parser's splitByOtherWhite produces a diagnostic for "helo"
+            // ending at _col. Re-running through the parser preserves filter
+            // behavior (markdown code blocks, typst math, etc.).
+            if (!_matched && _typed === '.') {
+                var _tempDiagnostics = [];
+                _parser.spellCheckRange(
+                    _document,
+                    _tempDiagnostics,
+                    { ignoreRegExpsMap: this.ignoreRegExpsMap, latexSpellParameters: this.latexSpellParametersMap },
+                    (doc, ctx, diags, token, ln, cn) => this.checkAndMarkCallback(doc, ctx, diags, token, ln, cn),
+                    (cmd, params) => this.commandCallback(cmd, params),
+                    _line, void 0, _line, _col + 1
+                );
+                _findAndFix(this, _tempDiagnostics);
             }
         }
 
@@ -1774,6 +1803,11 @@ var SpellRight = (function () {
     };
 
     SpellRight.prototype.addToWorkspaceDictionaryCodeAction = function (document, word) {
+        var _info = this.getWorkspaceDictionaryPathInfo(document && document.uri);
+        if (!_info.path) {
+            vscode.window.showWarningMessage('SpellRight: Cannot add to workspace dictionary — ' + _info.reason + '.');
+            return;
+        }
         if (!this.addWordToWorkspaceDictionary(word, true)) {
             vscode.window.showWarningMessage('SpellRight: The word \"' + word + '\" has already been added to workspace dictionary.');
         } else {
@@ -1788,6 +1822,12 @@ var SpellRight = (function () {
         var editor = vscode.window.activeTextEditor;
         if (!editor) {
             return; // No open text editor
+        }
+
+        var _info = this.getWorkspaceDictionaryPathInfo(editor.document.uri);
+        if (!_info.path) {
+            vscode.window.showWarningMessage('SpellRight: Cannot add to workspace dictionary — ' + _info.reason + '.');
+            return;
         }
 
         var selection = editor.selection;
@@ -1868,6 +1908,7 @@ var SpellRight = (function () {
     }
 
     SpellRight.prototype.addWordToDictionary = function (word, filename) {
+        if (!filename) return;
         if (!fs.existsSync(filename)) {
             fs.closeSync(fs.openSync(filename, 'w'));
         }
@@ -2010,25 +2051,40 @@ var SpellRight = (function () {
         return dictionaryPath;
     };
 
-    SpellRight.prototype.getWorkspaceDictionaryPath = function () {
-        var editor = vscode.window.activeTextEditor;
-        if (editor) {
-            if (vscode.workspace.getWorkspaceFolder(editor.document.uri)) {
-                var wpath = path.join(vscode.workspace.getWorkspaceFolder(editor.document.uri).uri.fsPath, '.vscode');
-                if (!fs.existsSync(wpath)) {
-                    try {
-                        fs.mkdirSync(wpath);
-                    } catch (err) {
-                        return null;
-                    }
-                }
-                return wpath;
-            } else {
-                return null;
+    SpellRight.prototype.getWorkspaceDictionaryPathInfo = function (uri) {
+        // Resolve the URI to use: explicit arg (passed from code-action), then
+        // active editor's document URI as a fallback.
+        var resolvedUri = uri;
+        if (!resolvedUri) {
+            var editor = vscode.window.activeTextEditor;
+            if (!editor) {
+                return { path: null, reason: 'no active text editor' };
             }
-        } else {
-            return null;
+            resolvedUri = editor.document.uri;
         }
+
+        var folders = vscode.workspace.workspaceFolders || [];
+        var folder = vscode.workspace.getWorkspaceFolder(resolvedUri);
+        if (!folder) {
+            var folderList = folders.length === 0
+                ? 'no folders are open'
+                : 'open folders: ' + folders.map(f => f.uri.fsPath).join(', ');
+            return { path: null, reason: 'document "' + resolvedUri.fsPath + '" is not inside any workspace folder (' + folderList + ')' };
+        }
+
+        var wpath = path.join(folder.uri.fsPath, '.vscode');
+        if (!fs.existsSync(wpath)) {
+            try {
+                fs.mkdirSync(wpath);
+            } catch (err) {
+                return { path: null, reason: 'could not create "' + wpath + '": ' + err.message };
+            }
+        }
+        return { path: wpath };
+    };
+
+    SpellRight.prototype.getWorkspaceDictionaryPath = function (uri) {
+        return this.getWorkspaceDictionaryPathInfo(uri).path;
     };
 
     SpellRight.prototype.getWorkspaceDictionaryFilename = function () {
