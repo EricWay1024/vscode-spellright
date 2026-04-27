@@ -1362,13 +1362,48 @@ var SpellRight = (function () {
                     _self.setDictionary(_langs[_ali]);
                     var _acSuggestions = _rankSuggestions(_word, bindings.getCorrectionsForMisspelling(_word));
                     if (_acSuggestions.length > 0) {
-                        var _acFix = _acSuggestions[0];
-                        var _editor = vscode.window.activeTextEditor;
-                        if (_editor && _editor.document === _document) {
-                            _editor.edit(function (editBuilder) {
-                                editBuilder.replace(_range, _acFix);
+                        var _capturedLine = _range.start.line;
+                        var _capturedHint = _range.start.character;
+                        var _capturedWord = _word;
+                        var _capturedFix = _acSuggestions[0];
+
+                        // Retry with re-search: VS Code version-locks
+                        // WorkspaceEdits at apply time, and on Remote-WSL
+                        // the RPC roundtrip is long enough that fast
+                        // typing increments the document version between
+                        // when applyEdit is queued and when it lands in
+                        // the main process — yielding "has changed in
+                        // the meantime" rejections. Each attempt
+                        // re-locates the captured misspelled word in
+                        // the current line text (so we don't clobber
+                        // the wrong span if the doc has shifted) and
+                        // retries until it either applies or the word
+                        // is gone (user kept editing past it).
+                        var _attempt = 0;
+                        var _maxAttempts = 5;
+                        var _tryApply = function () {
+                            _attempt++;
+                            var _editorNow = vscode.window.activeTextEditor;
+                            if (!_editorNow || _editorNow.document !== _document) return;
+                            if (_capturedLine >= _document.lineCount) return;
+                            var _lineNow = _document.lineAt(_capturedLine).text;
+                            var _at = -1;
+                            if (_lineNow.substr(_capturedHint, _capturedWord.length) === _capturedWord) {
+                                _at = _capturedHint;
+                            } else {
+                                _at = _lineNow.indexOf(_capturedWord);
+                            }
+                            if (_at < 0) return;
+                            var _freshRange = new vscode.Range(_capturedLine, _at, _capturedLine, _at + _capturedWord.length);
+                            var _wsEdit = new vscode.WorkspaceEdit();
+                            _wsEdit.replace(_document.uri, _freshRange, _capturedFix);
+                            vscode.workspace.applyEdit(_wsEdit).then(function (ok) {
+                                if (!ok && _attempt < _maxAttempts) setTimeout(_tryApply, 30);
+                            }, function () {
+                                if (_attempt < _maxAttempts) setTimeout(_tryApply, 30);
                             });
-                        }
+                        };
+                        setTimeout(_tryApply, 0);
                         return true;
                     }
                 }
