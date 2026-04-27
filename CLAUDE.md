@@ -155,13 +155,43 @@ If `Select Dictionary` shows none, check:
 
 ## Building and installing
 
+### Build
+
 ```bash
 # From /home/eric/projects/vscode-spellright
 vsce package --no-git-tag-version --allow-missing-repository
 ```
 
-Install the resulting `spellright-local-*.vsix`:
+This produces `spellright-local-3.0.148.vsix` in the project root.
+
+### Install via CLI (preferred)
+
+```bash
+code --install-extension ./spellright-local-3.0.148.vsix --force
+```
+
+- The `code` binary on `$PATH` from inside the WSL shell is `~/.vscode-server/bin/<hash>/bin/remote-cli/code` — running it installs on the **WSL side** automatically (output: "Installing extensions on WSL: Ubuntu..."). This is the right side for `extensionKind: ["workspace", "ui"]`.
+- `--force` is required when the version number hasn't bumped (VS Code refuses to reinstall the same `3.0.148` otherwise).
+- One-shot rebuild + reinstall:
+  ```bash
+  vsce package --no-git-tag-version --allow-missing-repository \
+    && code --install-extension ./spellright-local-3.0.148.vsix --force
+  ```
+- Reload the window afterwards (`Ctrl+Shift+P → Developer: Reload Window`, or `code -r .` from the shell).
+- To install on the **Windows side** instead, run `code.exe --install-extension <path>` from PowerShell or `cmd.exe`.
+
+Useful CLI commands:
+
+```bash
+code --list-extensions --show-versions | grep spellright   # confirm install
+code --uninstall-extension local.spellright-local          # remove
+```
+
+### Install via the GUI
+
 - **Local-only use** (no remote): Extensions panel → ... → Install from VSIX
-- **WSL/Remote**: connect to the remote first (title bar shows `[WSL: Ubuntu]` or similar), then install from VSIX while connected — this puts the extension on the workspace side. Verify with `Developer: Show Running Extensions` — the entry should show kind `Workspace`.
+- **WSL/Remote GUI install**: connect to the remote first (title bar shows `[WSL: Ubuntu]` or similar), then ... → Install from VSIX while connected — this puts the extension on the workspace side.
+
+Verify with `Developer: Show Running Extensions` — the entry should show kind `Workspace` when running on WSL/Remote.
 
 The extension ID is `local.spellright-local` (publisher `local`, name `spellright-local`) to avoid conflicting with the marketplace extension `ban.spellright`.
