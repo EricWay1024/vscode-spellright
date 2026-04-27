@@ -1335,10 +1335,32 @@ var SpellRight = (function () {
             var _col = _change.range.start.character;
             var _typed = _change.text;
 
+            // Re-rank Hunspell suggestions so candidates that share the
+            // typed word's initial letter (case-insensitive) come first,
+            // preserving Hunspell's order within each group. Hunspell often
+            // ranks by phonetic similarity, so for "labled" it can promote
+            // "balled" over "labeled" — which is rarely what the user
+            // intended when they're holding a word starting with `l`.
+            var _rankSuggestions = function (_word, _suggestions) {
+                if (!_word || _suggestions.length <= 1) return _suggestions;
+                var _first = _word.charAt(0).toLowerCase();
+                var _same = [];
+                var _other = [];
+                for (var _si = 0; _si < _suggestions.length; _si++) {
+                    var _s = _suggestions[_si];
+                    if (_s && _s.charAt(0).toLowerCase() === _first) {
+                        _same.push(_s);
+                    } else {
+                        _other.push(_s);
+                    }
+                }
+                return _same.concat(_other);
+            };
+
             var _applyFix = function (_self, _word, _langs, _range) {
                 for (var _ali = 0; _ali < _langs.length; _ali++) {
                     _self.setDictionary(_langs[_ali]);
-                    var _acSuggestions = bindings.getCorrectionsForMisspelling(_word);
+                    var _acSuggestions = _rankSuggestions(_word, bindings.getCorrectionsForMisspelling(_word));
                     if (_acSuggestions.length > 0) {
                         var _acFix = _acSuggestions[0];
                         var _editor = vscode.window.activeTextEditor;
@@ -1380,15 +1402,42 @@ var SpellRight = (function () {
             // behavior (markdown code blocks, typst math, etc.).
             if (!_matched && _typed === '.') {
                 var _tempDiagnostics = [];
-                _parser.spellCheckRange(
-                    _document,
-                    _tempDiagnostics,
-                    { ignoreRegExpsMap: this.ignoreRegExpsMap, latexSpellParameters: this.latexSpellParametersMap },
-                    (doc, ctx, diags, token, ln, cn) => this.checkAndMarkCallback(doc, ctx, diags, token, ln, cn),
-                    (cmd, params) => this.commandCallback(cmd, params),
-                    _line, void 0, _line, _col + 1
-                );
-                _findAndFix(this, _tempDiagnostics);
+                // checkAndMarkCallback writes to this.spellingContext[0]
+                // (for context-language tracking), but by this point in
+                // doDiffSpellCheck the local context has already been
+                // popped at line 1320. Push a transient one so the
+                // fallback's callback doesn't throw on undefined.
+                var _autoCorrectContextPushed = false;
+                if (this.spellingContext.length === 0) {
+                    this.spellingContext.push({
+                        _document: _document,
+                        _parser: _parser,
+                        _diagnostics: _tempDiagnostics,
+                        _line: 0,
+                        _start: Date.now(),
+                        _update: Date.now(),
+                        _languageDefault: settings.language.slice(),
+                        _languageContext: [],
+                        _languageCommand: [],
+                        _enabled: true
+                    });
+                    _autoCorrectContextPushed = true;
+                }
+                try {
+                    _parser.spellCheckRange(
+                        _document,
+                        _tempDiagnostics,
+                        { ignoreRegExpsMap: this.ignoreRegExpsMap, latexSpellParameters: this.latexSpellParametersMap },
+                        (doc, ctx, diags, token, ln, cn) => this.checkAndMarkCallback(doc, ctx, diags, token, ln, cn),
+                        (cmd, params) => this.commandCallback(cmd, params),
+                        _line, void 0, _line, _col + 1
+                    );
+                    _findAndFix(this, _tempDiagnostics);
+                } finally {
+                    if (_autoCorrectContextPushed) {
+                        this.spellingContext.shift();
+                    }
+                }
             }
         }
 
