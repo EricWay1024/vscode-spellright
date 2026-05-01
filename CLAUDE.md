@@ -25,7 +25,8 @@ The parser consumes Tinymist's LSP semantic tokens to determine spell-checkable 
 ### `_filter_global` (whole-document filter)
 
 1. Apply the user's `ignoreRegExpsMap` (no change from upstream).
-2. Look up the document URI in `SEMANTIC_CACHE` (a module-level `Map`). If the entry is fresh — i.e. not `'pending'` or `'unavailable'`, and `entry.version === document.version` — run the **semantic filter**. Otherwise blank every non-newline character (no spell check fires until Tinymist responds).
+2. Look up the document URI in `SEMANTIC_CACHE` (a module-level `Map`). If the entry is fresh — i.e. not `'pending'` or `'unavailable'`, and `entry.version === document.version` — run the **semantic filter** and return.
+3. Otherwise fall back to a regex pass (math `$...$`, `#identifier`, `@reference`, ` ```...``` `, `` `...` ``). The fallback exists so autocorrect / diff spell-check have *some* misspelled-word diagnostics during the ~200 ms debounce window between a keystroke and the next semantic refresh. Less accurate than the semantic path; the alternative (blank everything) silently disables autocorrect mid-typing.
 
 The semantic filter walks the delta-encoded LSP token array and marks spellable character positions:
 
@@ -35,11 +36,9 @@ The semantic filter walks the delta-encoded LSP token array and marks spellable 
 - **Container override types**: `raw`, `link`, `ref`, `label` — clear any spellable bit inside these ranges (Tinymist emits the parent token, but child leaves still get tokenized as `Text`, so the override has to win)
 - **Raw-block text scan**: Tinymist (current version) does *not* emit `raw` tokens for backtick spans on this corpus — block raw content gets tagged as plain `text` and the fences as nothing useful. So after the token walk, two regexes ` ```...``` ` and `` `...` `` clear those ranges. This isn't a fallback path; it's a targeted supplement for the one construct Tinymist's semantic output doesn't cover.
 
-If no fresh tokens exist, the entire document is blanked. Better a brief silent gap than wrong results from a regex approximation.
-
 ### `_filter_line` (per-line filter)
 
-Strips URLs and bare email addresses (defense-in-depth for plain-text mentions inside otherwise-spellable spans like paragraphs). The regex matches the plaintext parser.
+Strips `#import` lines (whole-line blank), URLs, and bare email addresses (defense-in-depth for plain-text mentions inside otherwise-spellable spans like paragraphs). The URL/email regexes match the plaintext parser. The `#import` filter is mostly there for the regex-fallback path; with fresh semantic tokens the line is already fully classified.
 
 ### `_parse`
 

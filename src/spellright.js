@@ -2423,6 +2423,7 @@ var SpellRight = (function () {
         if (!document) return;
         var key = document.uri.toString();
         typstParser.SEMANTIC_CACHE.delete(key);
+        typstParser.FILTERED_CACHE.delete(key);
         if (this.typstRefreshTimers) {
             var t = this.typstRefreshTimers.get(key);
             if (t) {
