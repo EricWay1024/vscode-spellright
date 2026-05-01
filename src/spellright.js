@@ -20,6 +20,7 @@ const bindings = require('../lib/bindings');
 const langcode = require('../lib/langcode')
 const doctype = require('../lib/doctype');
 const parser = require('../lib/parser');
+const typstParser = require('../lib/parsers/typst');
 
 var settings = {};
 var dictionaries = [];
@@ -126,11 +127,13 @@ var SpellRight = (function () {
 
         vscode.workspace.onDidOpenTextDocument(function (document) {
             this.doInitiateSpellCheck(document);
+            this.refreshTypstSemanticTokens(document);
         }, this, subscriptions);
 
         vscode.workspace.onDidCloseTextDocument(function (document) {
             _this.diagnosticCollection.delete(document.uri);
             _this.diagnosticMap[document.uri.toString()] = undefined;
+            _this.discardTypstSemanticState(document);
         }, this, subscriptions);
 
         vscode.workspace.onDidSaveTextDocument(function (document) {
@@ -139,7 +142,10 @@ var SpellRight = (function () {
             }
         }, this, subscriptions);
 
-        vscode.workspace.onDidChangeTextDocument(this.doDiffSpellCheck, this, subscriptions);
+        vscode.workspace.onDidChangeTextDocument(function (event) {
+            this.scheduleTypstSemanticRefresh(event.document);
+            this.doDiffSpellCheck(event);
+        }, this, subscriptions);
 
         // vscode.window.onDidChangeVisibleTextEditors(function () {
         //     _this.doInitiateSpellCheckVisible();
@@ -1168,7 +1174,7 @@ var SpellRight = (function () {
         var _signature = '';
         var _local_context = false;
 
-        _return = _parser.parseForCommands(_document, { ignoreRegExpsMap: this.ignoreRegExpsMap, latexSpellParameters: this.latexSpellParametersMap }, function (command, parameters, range) {
+        _return = _parser.parseForCommands(_document, this._getParserOptions(), function (command, parameters, range) {
 
             _signature = _signature + command + '-' + parameters;
 
@@ -1285,7 +1291,7 @@ var SpellRight = (function () {
 
             this.adjustDiagnostics(diagnostics, range, shift);
 
-            _parser.spellCheckRange(_document, diagnostics, { ignoreRegExpsMap: this.ignoreRegExpsMap, latexSpellParameters: this.latexSpellParametersMap }, (_document, context, diagnostics, token, linenumber, colnumber) => this.checkAndMarkCallback(_document, context, diagnostics, token, linenumber, colnumber), (command, parameters) => this.commandCallback(command, parameters), range.start.line, range.start.character, range.end.line + shift, range.end.character);
+            _parser.spellCheckRange(_document, diagnostics, this._getParserOptions(), (_document, context, diagnostics, token, linenumber, colnumber) => this.checkAndMarkCallback(_document, context, diagnostics, token, linenumber, colnumber), (command, parameters) => this.commandCallback(command, parameters), range.start.line, range.start.character, range.end.line + shift, range.end.character);
         }
 
         // Spell check trail left after changes/jumps
@@ -1308,7 +1314,7 @@ var SpellRight = (function () {
                         var _range = new vscode.Range(range.start.line + shift, range.start.character, range.end.line + shift, range.end.character);
                         this.adjustDiagnostics(diagnostics, _range, 0);
 
-                        _parser.spellCheckRange(_document, diagnostics, { ignoreRegExpsMap: this.ignoreRegExpsMap, latexSpellParameters: this.latexSpellParametersMap }, (_document, context, diagnostics, token, linenumber, colnumber) => this.checkAndMarkCallback(_document, context, diagnostics, token, linenumber, colnumber), (command, parameters) => this.commandCallback(command, parameters), range.start.line + shift, void 0, range.end.line + shift, void 0);
+                        _parser.spellCheckRange(_document, diagnostics, this._getParserOptions(), (_document, context, diagnostics, token, linenumber, colnumber) => this.checkAndMarkCallback(_document, context, diagnostics, token, linenumber, colnumber), (command, parameters) => this.commandCallback(command, parameters), range.start.line + shift, void 0, range.end.line + shift, void 0);
                     }
                 }
             }
@@ -1462,7 +1468,7 @@ var SpellRight = (function () {
                     _parser.spellCheckRange(
                         _document,
                         _tempDiagnostics,
-                        { ignoreRegExpsMap: this.ignoreRegExpsMap, latexSpellParameters: this.latexSpellParametersMap },
+                        this._getParserOptions(),
                         (doc, ctx, diags, token, ln, cn) => this.checkAndMarkCallback(doc, ctx, diags, token, ln, cn),
                         (cmd, params) => this.commandCallback(cmd, params),
                         _line, void 0, _line, _col + 1
@@ -1560,6 +1566,14 @@ var SpellRight = (function () {
             return;
         }
 
+        // Make sure the Typst semantic-token cache is populated for any code
+        // path that initiates a spell check (open handler misses on reload —
+        // documents are restored before our subscriptions attach, so the
+        // visible-bootstrap below is the only chance we get).
+        if (_document.languageId === 'typst') {
+            this.refreshTypstSemanticTokens(_document);
+        }
+
         this.getDocumentSymbols(_document, _parser);
 
         var _context = {
@@ -1580,8 +1594,7 @@ var SpellRight = (function () {
 
         var _length = this.spellingContext.length;
 
-        _return = _parser.parseForCommands(_document, { ignoreRegExpsMap: this.ignoreRegExpsMap,
-            latexSpellParameters: this.latexSpellParametersMap }, function (command, parameters, range) {
+        _return = _parser.parseForCommands(_document, this._getParserOptions(), function (command, parameters, range) {
 
             _signature = command + '-' + parameters;
 
@@ -1696,7 +1709,7 @@ var SpellRight = (function () {
 
         if (line <= document.lineCount) {
 
-            _return = parser.spellCheckRange(document, diagnostics, { ignoreRegExpsMap: this.ignoreRegExpsMap, latexSpellParameters: this.latexSpellParametersMap }, (document, context, diagnostics, token, linenumber, colnumber) => _this.checkAndMarkCallback(document, context, diagnostics, token, linenumber, colnumber), (command, parameters) => this.commandCallback(command, parameters), line, void 0, line + (SPELLRIGHT_LINES_BATCH - 1), void 0);
+            _return = parser.spellCheckRange(document, diagnostics, this._getParserOptions(), (document, context, diagnostics, token, linenumber, colnumber) => _this.checkAndMarkCallback(document, context, diagnostics, token, linenumber, colnumber), (command, parameters) => this.commandCallback(command, parameters), line, void 0, line + (SPELLRIGHT_LINES_BATCH - 1), void 0);
 
             // Update interface with already collected diagnostics
             if (this.updateInterval > 0) {
@@ -2312,6 +2325,122 @@ var SpellRight = (function () {
         return ret;
     }
 
+    // ---- Typst semantic-token integration ---------------------------------
+    // Tinymist (the Typst LSP) classifies every span via LSP semantic tokens.
+    // The Typst parser consults a per-document cache populated here to decide
+    // which spans are spell-checkable. The cache is updated lazily: open
+    // triggers an immediate fetch, edits schedule a debounced refetch, and
+    // when fresh tokens land we force a re-spell so the user sees the better
+    // result. On any cache miss the parser falls back to its regex filters.
+    // -----------------------------------------------------------------------
+    SpellRight.prototype.refreshTypstSemanticTokens = async function (document) {
+        if (!document || document.languageId !== 'typst') return;
+
+        var cache = typstParser.SEMANTIC_CACHE;
+        var uriKey = document.uri.toString();
+        var existing = cache.get(uriKey);
+
+        // Skip if a fetch is in flight, or if we already have tokens for the
+        // current document version. ('unavailable' is allowed to retry — the
+        // user might have just installed/started Tinymist.) This guard is
+        // what lets doInitiateSpellCheck call us unconditionally without
+        // recursing forever (refresh → doInitiateSpellCheck → refresh → …).
+        if (existing === 'pending') return;
+        if (existing && existing !== 'unavailable' &&
+            existing.version === document.version) return;
+
+        var versionAtRequest = document.version;
+        cache.set(uriKey, 'pending');
+
+        var _this = this;
+        // VS Code exposes two command IDs for semantic tokens depending on
+        // version; try the documented one first, fall back to the legacy
+        // alias. Same idea for the legend.
+        var _tryCommands = async function (ids, arg) {
+            var lastErr;
+            for (var i = 0; i < ids.length; i++) {
+                try {
+                    var r = await vscode.commands.executeCommand(ids[i], arg);
+                    if (r) return r;
+                } catch (e) { lastErr = e; }
+            }
+            if (lastErr) throw lastErr;
+            return undefined;
+        };
+        try {
+            var tokens = await _tryCommands([
+                'vscode.executeDocumentSemanticTokensProvider',
+                'vscode.provideDocumentSemanticTokens'
+            ], document.uri);
+            var legend = await _tryCommands([
+                'vscode.provideDocumentSemanticTokensLegend',
+                'vscode.executeDocumentSemanticTokensProviderLegend'
+            ], document.uri);
+
+            if (!tokens || !tokens.data || !legend ||
+                !legend.tokenTypes || !legend.tokenModifiers) {
+                cache.set(uriKey, 'unavailable');
+                return;
+            }
+
+            cache.set(uriKey, {
+                data: tokens.data,
+                legend: {
+                    tokenTypes: legend.tokenTypes,
+                    tokenModifiers: legend.tokenModifiers
+                },
+                version: versionAtRequest
+            });
+
+            // Re-run spell check so the user sees regions corrected by the
+            // semantic filter (math/code/refs that the regex pass missed,
+            // or words it spuriously stripped).
+            _this.doInitiateSpellCheck(document, true);
+        } catch (e) {
+            cache.set(uriKey, 'unavailable');
+            if (typeof SPELLRIGHT_DEBUG_OUTPUT !== 'undefined' && SPELLRIGHT_DEBUG_OUTPUT) {
+                console.log('[spellright] Tinymist semantic-token fetch failed: ' + (e && e.message));
+            }
+        }
+    };
+
+    SpellRight.prototype.scheduleTypstSemanticRefresh = function (document) {
+        if (!document || document.languageId !== 'typst') return;
+        if (!this.typstRefreshTimers) this.typstRefreshTimers = new Map();
+
+        var key = document.uri.toString();
+        var prev = this.typstRefreshTimers.get(key);
+        if (prev) clearTimeout(prev);
+
+        var _this = this;
+        this.typstRefreshTimers.set(key, setTimeout(function () {
+            _this.typstRefreshTimers.delete(key);
+            _this.refreshTypstSemanticTokens(document);
+        }, 200));
+    };
+
+    SpellRight.prototype.discardTypstSemanticState = function (document) {
+        if (!document) return;
+        var key = document.uri.toString();
+        typstParser.SEMANTIC_CACHE.delete(key);
+        if (this.typstRefreshTimers) {
+            var t = this.typstRefreshTimers.get(key);
+            if (t) {
+                clearTimeout(t);
+                this.typstRefreshTimers.delete(key);
+            }
+        }
+    };
+
+    SpellRight.prototype._getParserOptions = function () {
+        return {
+            ignoreRegExpsMap: this.ignoreRegExpsMap,
+            latexSpellParameters: this.latexSpellParametersMap,
+            typstSpellCheckComments: settings.typstSpellCheckComments,
+            typstSpellCheckStrings:  settings.typstSpellCheckStrings
+        };
+    };
+
     SpellRight.prototype.getSettings = function (document = undefined) {
         var uri = undefined;
         var languageid = undefined;
@@ -2330,6 +2459,11 @@ var SpellRight = (function () {
         for (var p in _settings) settings[p] = _settings[p];
         settings.language = this.readAsArray(_settings.language);
         settings.parserByClass = Object.assign({}, _settings.parserByClass);
+
+        // Nested keys (`spellright.typst.*`) — pull explicitly so we don't
+        // depend on the iteration above to walk into the `typst` object.
+        settings.typstSpellCheckComments = _settings.get('typst.spellCheckComments', true);
+        settings.typstSpellCheckStrings  = _settings.get('typst.spellCheckStrings',  false);
 
         this.collectDictionaries();
         this.selectDefaultLanguage();

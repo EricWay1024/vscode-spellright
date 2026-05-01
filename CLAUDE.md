@@ -18,24 +18,53 @@ The key invariant for both filter methods: **replacements must preserve document
 
 ## Typst parser (`lib/parsers/typst.js`)
 
-New file, registered in `lib/doctype.js` under language ID `typst` and extension `.typ`. Also added to the default `documentTypes` list in `package.json`.
+Registered in `lib/doctype.js` under language ID `typst` and extension `.typ`. Also added to the default `documentTypes` list in `package.json`.
 
-### `_filter_global` filters (whole-document, applied before line-by-line parsing)
+The parser consumes Tinymist's LSP semantic tokens to determine spell-checkable regions, instead of guessing via regex. Tinymist classifies every span; we allowlist a small set of semantic token types as "natural language" and blank everything else.
 
-- **Math**: `/\$[\s\S]*?\$/g` — non-greedy, matches across newlines for display math blocks
-- **`#identifier`**: `/#\w+/g` — blanks the identifier name after `#` (e.g. `pagebreak` in `#pagebreak()`)
-- **`@reference`**: `/@[\w:.-]+/g` — blanks citation/label references (e.g. `@cor:my-label`)
+### `_filter_global` (whole-document filter)
 
-Note: `#` and `@` are already word-boundary characters in `SPELLRIGHT_LEXEM_BUILD`, so only the identifier after them needs blanking.
+1. Apply the user's `ignoreRegExpsMap` (no change from upstream).
+2. Look up the document URI in `SEMANTIC_CACHE` (a module-level `Map`). If the entry is fresh — i.e. not `'pending'` or `'unavailable'`, and `entry.version === document.version` — run the **semantic filter**. Otherwise blank every non-newline character (no spell check fires until Tinymist responds).
 
-### `_filter_line` filters (per line)
+The semantic filter walks the delta-encoded LSP token array and marks spellable character positions:
 
-- **`#import` lines**: `/^\s*#import\b.*/g` — blanks the entire line, catching paths and imported names (e.g. `#import "../../lib.typ": *`)
-- URLs and email addresses (same as plaintext parser)
+- **Always spellable**: `text`, `heading`, `term` (Tinymist's `Heading`, `ListTerm`, and the leaf-default `Text` token type)
+- **Gated**: `comment` (default on, opt-out via `spellright.typst.spellCheckComments`), `string` (default off, opt-in via `spellright.typst.spellCheckStrings`)
+- **Math modifier**: any token whose modifier mask includes the `math` bit is skipped — covers leaf `text` tokens inside `$...$` regions
+- **Container override types**: `raw`, `link`, `ref`, `label` — clear any spellable bit inside these ranges (Tinymist emits the parent token, but child leaves still get tokenized as `Text`, so the override has to win)
+- **Raw-block text scan**: Tinymist (current version) does *not* emit `raw` tokens for backtick spans on this corpus — block raw content gets tagged as plain `text` and the fences as nothing useful. So after the token walk, two regexes ` ```...``` ` and `` `...` `` clear those ranges. This isn't a fallback path; it's a targeted supplement for the one construct Tinymist's semantic output doesn't cover.
+
+If no fresh tokens exist, the entire document is blanked. Better a brief silent gap than wrong results from a regex approximation.
+
+### `_filter_line` (per-line filter)
+
+Strips URLs and bare email addresses (defense-in-depth for plain-text mentions inside otherwise-spellable spans like paragraphs). The regex matches the plaintext parser.
 
 ### `_parse`
 
-Identical structure to the plaintext parser. Tokens are tagged with `parser: 'typst'` which enables per-parser notification class configuration via `spellright.notificationClassByParser`.
+Identical structure to the plaintext parser. Tokens are tagged `parser: 'typst'` for per-parser notification class configuration via `spellright.notificationClassByParser`.
+
+### `SEMANTIC_CACHE` lifecycle (managed by `src/spellright.js`)
+
+The cache is a `Map<uriString, 'pending' | 'unavailable' | { data: Uint32Array, legend, version }>` exported from `lib/parsers/typst.js`. Three methods on the SpellRight prototype manage it:
+
+- `refreshTypstSemanticTokens(document)` — async; fires both `vscode.executeDocumentSemanticTokensProvider` (modern ID) and `vscode.provideDocumentSemanticTokens` (legacy alias) and the matching legend command, falling through on errors. Stores the decoded result keyed by URI with `version = document.version` *at request time*. On success, calls `doInitiateSpellCheck(document, true)` to re-run the spell pass with the now-fresh filter. Has an early-out guard so calling it on a fresh-or-pending entry is a no-op (lets us call it from `doInitiateSpellCheck` without infinite recursion).
+- `scheduleTypstSemanticRefresh(document)` — 200 ms debounce per URI; called on every `onDidChangeTextDocument` so rapid typing doesn't hammer the LSP.
+- `discardTypstSemanticState(document)` — called on `onDidCloseTextDocument`; deletes the cache entry and clears any pending refresh timer.
+
+The fetch is also kicked off from inside `doInitiateSpellCheck` for any typst document. This matters at window-reload time: VS Code restores documents *before* `onDidOpenTextDocument` listeners attach, so the open handler misses them — but the visible-bootstrap path (`doInitiateSpellCheckVisible`) does call `doInitiateSpellCheck`, so piggy-backing the fetch there guarantees coverage.
+
+### Settings (`spellright.typst.*`)
+
+- `spellright.typst.spellCheckComments` — boolean, default `true`. When false, comments are skipped.
+- `spellright.typst.spellCheckStrings` — boolean, default `false`. When true, string literal contents are checked.
+
+There is no `useSemanticTokens` toggle: the semantic path is the only path. To disable typst spell-check, remove `typst` from `spellright.documentTypes`.
+
+### Parser options plumbing
+
+`SpellRight.prototype._getParserOptions()` is the single source of truth for the options object passed to `parseForCommands` / `spellCheckRange` (5 call sites in `src/spellright.js`). It carries `ignoreRegExpsMap`, `latexSpellParameters`, and the two typst-spellcheck booleans.
 
 ## Autocorrect (`src/spellright.js`)
 

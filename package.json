@@ -200,6 +200,18 @@
           "scope": "resource",
           "description": "Automatically replace misspelled words with the top suggestion when a word boundary character (space, punctuation) is typed."
         },
+        "spellright.typst.spellCheckComments": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "When semantic tokens are in use for Typst, spell-check the contents of // line and /* */ block comments."
+        },
+        "spellright.typst.spellCheckStrings": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "description": "When semantic tokens are in use for Typst, also spell-check string literals (e.g. \"hello\")."
+        },
         "spellright.useDocumentSymbolsInCode": {
           "type": "boolean",
           "default": true,
