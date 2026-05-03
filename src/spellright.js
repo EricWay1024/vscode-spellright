@@ -2335,6 +2335,7 @@ var SpellRight = (function () {
     // -----------------------------------------------------------------------
     SpellRight.prototype.refreshTypstSemanticTokens = async function (document) {
         if (!document || document.languageId !== 'typst') return;
+        if (!settings.typstUseSemanticTokens) return;
 
         var cache = typstParser.SEMANTIC_CACHE;
         var uriKey = document.uri.toString();
@@ -2406,6 +2407,7 @@ var SpellRight = (function () {
 
     SpellRight.prototype.scheduleTypstSemanticRefresh = function (document) {
         if (!document || document.languageId !== 'typst') return;
+        if (!settings.typstUseSemanticTokens) return;
         if (!this.typstRefreshTimers) this.typstRefreshTimers = new Map();
 
         var key = document.uri.toString();
@@ -2437,6 +2439,7 @@ var SpellRight = (function () {
         return {
             ignoreRegExpsMap: this.ignoreRegExpsMap,
             latexSpellParameters: this.latexSpellParametersMap,
+            typstUseSemanticTokens:  settings.typstUseSemanticTokens,
             typstSpellCheckComments: settings.typstSpellCheckComments,
             typstSpellCheckStrings:  settings.typstSpellCheckStrings
         };
@@ -2463,6 +2466,7 @@ var SpellRight = (function () {
 
         // Nested keys (`spellright.typst.*`) — pull explicitly so we don't
         // depend on the iteration above to walk into the `typst` object.
+        settings.typstUseSemanticTokens  = _settings.get('typst.useSemanticTokens',  true);
         settings.typstSpellCheckComments = _settings.get('typst.spellCheckComments', true);
         settings.typstSpellCheckStrings  = _settings.get('typst.spellCheckStrings',  false);
 

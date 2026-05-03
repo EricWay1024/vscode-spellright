@@ -200,6 +200,12 @@
           "scope": "resource",
           "description": "Automatically replace misspelled words with the top suggestion when a word boundary character (space, punctuation) is typed."
         },
+        "spellright.typst.useSemanticTokens": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "Use Tinymist semantic tokens to determine spell-checkable regions in Typst (.typ) documents. When off, the parser uses regex only — math, code, and raw blocks are detected by pattern, not by language-server classification. Turn off if Tinymist is not installed or if you want to avoid the LSP request entirely."
+        },
         "spellright.typst.spellCheckComments": {
           "type": "boolean",
           "default": true,

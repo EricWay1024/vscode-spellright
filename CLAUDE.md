@@ -56,14 +56,15 @@ The fetch is also kicked off from inside `doInitiateSpellCheck` for any typst do
 
 ### Settings (`spellright.typst.*`)
 
-- `spellright.typst.spellCheckComments` — boolean, default `true`. When false, comments are skipped.
-- `spellright.typst.spellCheckStrings` — boolean, default `false`. When true, string literal contents are checked.
+- `spellright.typst.useSemanticTokens` — boolean, default `true`. When `false`, the parser skips Tinymist entirely (no LSP request fires) and uses the regex pass exclusively. Useful when Tinymist isn't installed, or to avoid the LSP round-trip on big files.
+- `spellright.typst.spellCheckComments` — boolean, default `true`. When false, comments are skipped (semantic path only — regex fallback always strips `// ...` style comments via the `#identifier` pattern not at all, so this setting is moot when `useSemanticTokens=false`).
+- `spellright.typst.spellCheckStrings` — boolean, default `false`. When true, string literal contents are checked (semantic path only).
 
-There is no `useSemanticTokens` toggle: the semantic path is the only path. To disable typst spell-check, remove `typst` from `spellright.documentTypes`.
+To disable typst spell-check entirely, remove `typst` from `spellright.documentTypes`.
 
 ### Parser options plumbing
 
-`SpellRight.prototype._getParserOptions()` is the single source of truth for the options object passed to `parseForCommands` / `spellCheckRange` (5 call sites in `src/spellright.js`). It carries `ignoreRegExpsMap`, `latexSpellParameters`, and the two typst-spellcheck booleans.
+`SpellRight.prototype._getParserOptions()` is the single source of truth for the options object passed to `parseForCommands` / `spellCheckRange` (5 call sites in `src/spellright.js`). It carries `ignoreRegExpsMap`, `latexSpellParameters`, `typstUseSemanticTokens`, and the two typst-spellcheck booleans. The flag is also baked into the `FILTERED_CACHE` fingerprint so toggling it invalidates memoized output.
 
 ## Autocorrect (`src/spellright.js`)
 
