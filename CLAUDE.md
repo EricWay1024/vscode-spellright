@@ -137,9 +137,9 @@ const nodeFiles = glob.globSync(`bin/${baseName}*${process.arch}*.node`, { cwd: 
 | `spellchecker-win32-{34.2.0,35.5.1,37.2.3,39.2.3}-x64.node` | Electron 34 / 35 / 37 / 39 | 130 / 133 / 136 / 140 | Windows VS Code GUI |
 | `spellchecker-macos-{35.5.1,37.2.3,39.2.3}-{x64,arm64}.node` | same Electron versions | same | macOS VS Code GUI |
 | `spellchecker-linux-{35.5.1,37.2.3,39.2.3}-{x64,ia32}.node` | same Electron versions | same | Linux VS Code GUI |
-| `spellchecker-linux-node22.22.1-x64.node` | **Node 22.22.1 (stock Node)** | **127** | **VS Code Server** (Remote-WSL, Remote-SSH) — extension host runs on `~/.vscode-server/bin/<hash>/node`, NOT Electron |
+| `spellchecker-linux-node{22.22.1,24.15.0}-x64.node` | **Node 22.22.1 / 24.15.0 (stock Node)** | **127 / 137** | **VS Code Server** (Remote-WSL, Remote-SSH) — extension host runs on `~/.vscode-server/bin/<hash>/node`, NOT Electron |
 
-The Node-22 binary is the one the original upstream is missing. Without it, `spellright` activates on the local Windows side fine but silently fails on the WSL side (every `require()` in the loader's loop throws `NODE_MODULE_VERSION mismatch`), making `bindings.Spellchecker` undefined and aborting activation.
+The Node-server binary is the one the original upstream is missing. Without one matching the server's ABI, `spellright` activates on the local Windows side fine but silently fails on the WSL side (every `require()` in the loader's loop throws `NODE_MODULE_VERSION mismatch`), making `bindings.Spellchecker` undefined and aborting activation — which presents as commands like `spellright.selectDictionary` being "not found", no diagnostics, and no status-bar item. Each time VS Code Server bumps its bundled Node (e.g. 22 → 24), a new binary must be built for the new ABI; old ones stay as fallback.
 
 ### Rebuilding the Node-server binary
 
@@ -150,6 +150,8 @@ cd lib/bin/node-spellchecker
 npx node-gyp rebuild --target=<NODE_VERSION> --arch=x64
 cp build/Release/spellchecker.node ../spellchecker-linux-node<NODE_VERSION>-x64.node
 ```
+
+**`nan` version gotcha:** Node 24's V8 removed `v8::FunctionCallbackInfo::Holder()`, which older `nan` (≤ 2.19, the version hoisted at the repo root) still calls — the build fails with `'…FunctionCallbackInfo<v8::Value>' has no member named 'Holder'`. `node-spellchecker`'s own `package.json` pins `nan: ^2.27.0`; ensure that resolves locally (`cd lib/bin/node-spellchecker && npm install`) before building, since `binding.gyp` locates nan via `node -e "require('nan')"` from that cwd and would otherwise pick up the stale root copy.
 
 Old binaries can stay in `lib/bin/` — the loader skips ABI mismatches and tries the next. To check which one VS Code Server actually picks:
 
